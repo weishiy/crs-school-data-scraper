@@ -1,0 +1,5 @@
+requests>=2.0
+beautifulsoup4>=4.0
+pandas>=2.0
+openpyxl>=3.0
+pypinyin>=0.50
