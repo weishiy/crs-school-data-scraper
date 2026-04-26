@@ -9,6 +9,7 @@ from bs4 import BeautifulSoup
 from openpyxl import load_workbook
 from openpyxl.styles import Alignment
 from pypinyin import lazy_pinyin
+from datetime import datetime
 
 
 BASE_URL = "https://www.crs.jsj.edu.cn"
@@ -28,7 +29,7 @@ EXTERNAL_HEADERS = {
 }
 
 # 可直接扩展，例如：COUNTRIES = ["英国", "加拿大"]
-COUNTRIES = ["加拿大"]
+COUNTRIES = ["美国"]
 
 # 联系方式自动搜索时，最多处理多少条。None 表示全部处理。
 MAX_ENRICH_RECORDS = None
@@ -300,6 +301,7 @@ def fetch_external_html(session: requests.Session, url: str) -> str:
 
 def extract_detail_fields(html: str) -> dict:
     soup = BeautifulSoup(html, "html.parser")
+    text = soup.get_text("\n", strip=True)
 
     detail_data = {
         "level": "",
@@ -307,6 +309,9 @@ def extract_detail_fields(html: str) -> dict:
         "major_or_course": "",
         "degree_awarded": "",
         "foreign_degree_certificate": "",
+        "admission_years": "",
+        "admission_end_year": "",
+        "is_active": "",
     }
 
     for tr in soup.find_all("tr"):
@@ -341,11 +346,33 @@ def extract_detail_fields(html: str) -> dict:
             elif key == "颁发证书":
                 detail_data["degree_awarded"] = value
 
-                # 提取“外方：xxx”
                 match = re.search(r"外方[：:]\s*(.*?)(?=中方[：:]|$)", value)
                 if match:
                     detail_data["foreign_degree_certificate"] = match.group(1).strip()
+            elif key == "招生起止年份":
+                detail_data["admission_years"] = value
 
+                current_year = datetime.now().year
+
+                if "至今" in value or "长期" in value:
+                    detail_data["is_active"] = "是"
+                else:
+                    match = re.search(r"(\d{4})年[—\-－~～至到](\d{4})年", value)
+                    if match:
+                        end_year = int(match.group(2))
+                        detail_data["admission_end_year"] = end_year
+
+                        if end_year >= current_year:
+                            detail_data["is_active"] = "是"
+                        else:
+                            detail_data["is_active"] = "否（招生年份已过）"
+    # 兜底：如果表格里没抓到，再从整个详情页文本里抓
+    if not detail_data["foreign_degree_certificate"]:
+        full_match = re.search(r"颁发证书[\s\S]*?外方[：:]\s*(.*)", text)
+        if full_match:
+            detail_data["foreign_degree_certificate"] = full_match.group(1).strip()
+
+    return detail_data
 
 # ========= 自动搜索联系方式页 =========
 def build_search_queries(row: dict) -> List[str]:
@@ -849,6 +876,9 @@ def save_all_to_excel(all_records: List[Dict], detail_records: List[Dict], filen
             "name",
             "level",
             "duration",
+            "admission_years",
+            "admission_end_year",
+            "is_active",
             "major_or_course",
             "degree_awarded",
             "foreign_degree_certificate",
@@ -961,7 +991,12 @@ def main():
         "name",
         "level",
         "duration",
+        "admission_years",
+        "admission_end_year",
+        "is_active",
         "major_or_course",
+        "degree_awarded",
+        "foreign_degree_certificate",
         "study_mode",
         "link",
         "contact_url",
@@ -971,6 +1006,7 @@ def main():
         "wechat",
         "wechat_official_account",
         "address",
+
     ]
 
     existing_cols = [c for c in contact_cols if c in df_contacts.columns]
